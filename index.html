@@ -1,38 +1,99 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Subdomain Portal Login</title>
+  <meta charset="UTF-8">
+  <title>Subdomain Auth & Sheet Verification</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 20px; }
+    .box { border: 1px solid #ccc; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+    input { display: block; width: 100%; margin: 10px 0; padding: 8px; box-sizing: border-box; }
+    button { padding: 10px 16px; cursor: pointer; }
+    pre { background: #f4f4f4; padding: 15px; overflow-x: auto; border-radius: 6px; }
+  </style>
 </head>
 <body>
-  <form id="loginForm">
-    <input type="email" id="email" placeholder="Email" required />
-    <input type="password" id="password" placeholder="Password" required />
-    <button type="submit">Sign In</button>
-  </form>
-  <p id="status"></p>
+
+  <div id="loginSection" class="box">
+    <h2>Subdomain Login</h2>
+    <input type="email" id="email" value="admin@example.com" placeholder="Email">
+    <input type="password" id="password" value="password" placeholder="Password">
+    <button onclick="login()">Sign In & Verify</button>
+    <p id="statusMsg" style="color: red;"></p>
+  </div>
+
+  <div id="dashboardSection" class="box" style="display: none;">
+    <h2>Verified Sheet Data Dump</h2>
+    <p>Logged in as: <strong id="userDisplay"></strong></p>
+    <button onclick="fetchAllSheets()">Refresh All Sheet Data</button>
+    <button onclick="logout()">Logout</button>
+    <h3>All Tabs JSON Output:</h3>
+    <pre id="outputDump">Loading...</pre>
+  </div>
 
   <script>
-    const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzWioC8mFp-jsKPYr6Xe9k2ZbDfKDYnSxI6DjlquuSOaW-WUx2QLvLBsAmsy-QankqaOQ/exec";
+    const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzWioC8mFp-jsKPYr6Xe9k2ZbDfKDYnSxI6DjlquuSOaW-WUx2QLvLBsAmsy-QankqaOQ/exec';
 
-    document.getElementById("loginForm").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const email = document.getElementById("email").value;
-      const password = document.getElementById("password").value;
+    // Hash password client-side using Web Crypto API
+    async function sha256(message) {
+      const msgBuffer = new TextEncoder().encode(message);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+      return Array.from(new Uint8Array(hashBuffer))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+    }
 
-      const response = await fetch(SCRIPT_URL, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({ action: "login", email, password })
+    async function callApi(payload) {
+      const response = await fetch(APPS_SCRIPT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload)
       });
+      return response.json();
+    }
 
-      const result = await response.json();
-      if (result.success) {
-        localStorage.setItem("auth_token", result.token);
-        document.getElementById("status").textContent = `Logged in as ${result.role}`;
+    async function login() {
+      const email = document.getElementById('email').value;
+      const password = document.getElementById('password').value;
+      const passwordHash = await sha256(password);
+
+      const res = await callApi({ action: 'login', email, passwordHash });
+      if (res.success) {
+        sessionStorage.setItem('auth_token', res.token);
+        showDashboard();
       } else {
-        document.getElementById("status").textContent = result.message;
+        document.getElementById('statusMsg').innerText = res.error;
       }
-    });
+    }
+
+    async function fetchAllSheets() {
+      const token = sessionStorage.getItem('auth_token');
+      const res = await callApi({ action: 'verifyAndFetchAll', token });
+      
+      if (res.success) {
+        document.getElementById('userDisplay').innerText = `${res.user.email} (${res.user.role})`;
+        document.getElementById('outputDump').innerText = JSON.stringify(res.sheets, null, 2);
+      } else {
+        logout();
+      }
+    }
+
+    async function logout() {
+      const token = sessionStorage.getItem('auth_token');
+      if (token) await callApi({ action: 'logout', token });
+      sessionStorage.removeItem('auth_token');
+      document.getElementById('loginSection').style.display = 'block';
+      document.getElementById('dashboardSection').style.display = 'none';
+    }
+
+    function showDashboard() {
+      document.getElementById('loginSection').style.display = 'none';
+      document.getElementById('dashboardSection').style.display = 'block';
+      fetchAllSheets();
+    }
+
+    // Auto-verify existing session on page load
+    if (sessionStorage.getItem('auth_token')) {
+      showDashboard();
+    }
   </script>
 </body>
 </html>
